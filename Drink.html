@@ -43,7 +43,7 @@ button,input{font:inherit;color:var(--tx)}
 <div id="ov"><canvas id="tc"></canvas>
 <div id="otop"><button class="btn" id="oprev">◀</button><span id="oname"></span><button class="btn" id="onext">▶</button><button class="btn" id="oclose">✕</button></div>
 <div id="omsg"></div>
-<div id="obot"><button class="btn" id="orefill">Refill</button><span id="pct">100%</span><button class="btn" id="oflip">⇄ Flip</button></div></div>
+<div id="obot"><button class="btn" id="orefill">Refill</button><span id="pct">100%</span><button class="btn" id="oflip">🙃 Flip upside-down</button></div></div>
 <script>
 const D=`Water|💧|#a9dcff|0
 Sparkling Water|🫧|#c8ecff|1
@@ -170,7 +170,7 @@ const $=id=>document.getElementById(id);
 const ov=$('ov'),tc=$('tc'),tx=tc.getContext('2d');
 const iOS=typeof DeviceMotionEvent!=='undefined'&&typeof DeviceMotionEvent.requestPermission==='function';
 const TAU=Math.PI*2,wrap=a=>a-TAU*Math.round(a/TAU);
-let tOn=false,tl=1,th=0,tv=0,tt=0,hasSensor=false,dragTh=null,flip=1,tlast=0,tdone=false,mT=0,loopId=0,lock=null,gx=0,gy=9.8;
+let tOn=false,tl=1,th=0,tv=0,tt=0,hasSensor=false,dragTh=null,flipA=0,sgn=0,tlast=0,tdone=false,mT=0,loopId=0,lock=null,gx=0,gy=9.8;
 const tb=[];for(let i=0;i<40;i++)tb.push({x:Math.random(),y:Math.random(),s:.05+Math.random()*.1,r:2+Math.random()*3});
 function tsize(){const r=window.devicePixelRatio||1;tc.width=Math.round(innerWidth*r);tc.height=Math.round(innerHeight*r);tx.setTransform(r,0,0,r,0,0)}
 function tmsg(s,keep){const m=$('omsg');m.textContent=s;m.style.display=s?'block':'none';clearTimeout(mT);if(s&&!keep)mT=setTimeout(()=>m.style.display='none',3500)}
@@ -179,23 +179,24 @@ async function wl(on){try{if(on&&navigator.wakeLock)lock=await navigator.wakeLoc
 function onMotion(e){
   const a=e.accelerationIncludingGravity;
   if(!a||a.x==null||a.y==null)return;
-  const s=iOS?-1:1;
+  if(!sgn&&(!screen.orientation||!screen.orientation.angle)&&Math.abs(a.y)>6&&Math.abs(a.y)>2*Math.abs(a.x)){sgn=a.y>0?1:-1;gx=sgn*a.x;gy=sgn*a.y}
+  const s=sgn||(iOS?-1:1);
   gx+=(s*a.x-gx)*.35;gy+=(s*a.y-gy)*.35;      // low-pass filter to calm sensor noise
   if(Math.hypot(gx,gy)<2.5)return;             // phone lying flat: keep last angle
   hasSensor=true;
   const ra=((screen.orientation&&screen.orientation.angle)||0)*Math.PI/180; // landscape support
-  tt=flip*wrap(Math.atan2(-gx,gy)+ra);
+  tt=wrap(Math.atan2(-gx,gy)+ra+flipA);
 }
 async function openTilt(){
   if(tOn)return;
   tOn=true;ov.style.display='block';tsize();
   try{ov.requestFullscreen&&ov.requestFullscreen().catch(()=>{})}catch(e){}
-  tl=1;th=0;tv=0;tt=0;gx=0;gy=9.8;hasSensor=false;tdone=false;dragTh=null;
+  tl=1;th=0;tv=0;tt=0;gx=0;gy=9.8;sgn=0;hasSensor=false;tdone=false;dragTh=null;
   updTName();
   let ok=true;
   try{if(iOS)ok=(await DeviceMotionEvent.requestPermission())==='granted'}catch(e){ok=false}
   if(!tOn)return;                               // closed while the permission prompt was open
-  if(ok){window.addEventListener('devicemotion',onMotion);tmsg('Tilt your phone sideways to drink')}
+  if(ok){window.addEventListener('devicemotion',onMotion);tmsg('Hold your phone upright, then tilt it sideways to drink')}
   else tmsg('Motion access was blocked \u2013 drag left or right to tilt instead',true);
   setTimeout(()=>{if(tOn&&ok&&!hasSensor)tmsg('No tilt sensor found \u2013 drag left or right on the screen to tilt')},1800);
   wl(true);
@@ -237,7 +238,7 @@ window.addEventListener('resize',()=>{if(tOn)tsize()});
 document.addEventListener('visibilitychange',()=>{if(tOn&&!document.hidden)wl(true)});
 $('tiltbtn').onclick=openTilt;$('oclose').onclick=closeTilt;
 $('orefill').onclick=()=>{tl=1;tdone=false;tmsg('')};
-$('oflip').onclick=()=>{flip*=-1;tt*=-1;tmsg('Direction flipped')};
+$('oflip').onclick=()=>{flipA=flipA?0:Math.PI;tt=wrap(tt+Math.PI);tmsg('Flipped upside-down')};
 const step=k=>{setDrink((cur+k+D.length)%D.length);tl=1;tdone=false;tmsg('');updTName()};
 $('oprev').onclick=()=>step(-1);$('onext').onclick=()=>step(1);
 
