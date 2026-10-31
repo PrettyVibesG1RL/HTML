@@ -106,7 +106,7 @@ Virgin Piña Colada|🍍|#fff4c2|0
 Hibiscus Agua Fresca|🌺|#c2185b|0`.split('\n').map(l=>{const p=l.split('|');return{n:p[0],e:p[1],c:p[2],f:+p[3]}});
 
 const cv=document.getElementById('stage'),ctx=cv.getContext('2d');
-const dpr=window.devicePixelRatio||1;cv.width=320*dpr;cv.height=400*dpr;cv.style.width='320px';cv.style.height='400px';ctx.scale(dpr,dpr);
+const dpr=window.devicePixelRatio||1;cv.width=320*dpr;cv.height=400*dpr;cv.style.width='320px';cv.style.height='auto';ctx.scale(dpr,dpr);
 let cur=0,lvl=1,ang=0,hold=false,glasses=0,sips=0,last=performance.now(),bub=[];
 for(let i=0;i<26;i++)bub.push({x:Math.random()*110-55,y:Math.random()*230,s:12+Math.random()*25,r:1.5+Math.random()*2.5});
 
@@ -154,9 +154,10 @@ function loop(t){
 }
 
 cv.addEventListener('pointerdown',e=>{hold=true;cv.setPointerCapture(e.pointerId)});
-window.addEventListener('pointerup',()=>hold=false);
+['pointerup','pointercancel','blur'].forEach(ev=>window.addEventListener(ev,()=>hold=false));
+document.addEventListener('visibilitychange',()=>{if(document.hidden)hold=false});
 window.addEventListener('keydown',e=>{if(e.code==='Space'&&e.target.tagName!=='INPUT'){e.preventDefault();hold=true}});
-window.addEventListener('keyup',e=>{if(e.code==='Space')hold=false});
+window.addEventListener('keyup',e=>{if(e.code==='Space'){hold=false;if(e.target.tagName!=='INPUT')e.preventDefault()}});
 document.getElementById('refill').onclick=()=>setDrink(cur);
 
 const grid=document.getElementById('grid');
@@ -165,33 +166,57 @@ D.forEach((d,i)=>{const b=document.createElement('button');b.className='chip';b.
 document.getElementById('q').oninput=e=>{const v=e.target.value.toLowerCase();grid.querySelectorAll('.chip').forEach(c=>c.style.display=c.dataset.n.includes(v)?'':'none')};
 
 /* ---- Tilt mode: drink fills the whole screen, phone tilt controls it ---- */
-const ov=document.getElementById('ov'),tc=document.getElementById('tc'),tx=tc.getContext('2d'),$=id=>document.getElementById(id);
+const $=id=>document.getElementById(id);
+const ov=$('ov'),tc=$('tc'),tx=tc.getContext('2d');
 const iOS=typeof DeviceMotionEvent!=='undefined'&&typeof DeviceMotionEvent.requestPermission==='function';
-let tOn=false,tl=1,th=0,tv=0,tt=0,hasSensor=false,dragTh=null,flip=1,tlast=0,tdone=false,mT=0;
+const TAU=Math.PI*2,wrap=a=>a-TAU*Math.round(a/TAU);
+let tOn=false,tl=1,th=0,tv=0,tt=0,hasSensor=false,dragTh=null,flip=1,tlast=0,tdone=false,mT=0,loopId=0,lock=null,gx=0,gy=9.8;
 const tb=[];for(let i=0;i<40;i++)tb.push({x:Math.random(),y:Math.random(),s:.05+Math.random()*.1,r:2+Math.random()*3});
-function tsize(){tc.width=innerWidth*dpr;tc.height=innerHeight*dpr;tx.setTransform(dpr,0,0,dpr,0,0)}
+function tsize(){const r=window.devicePixelRatio||1;tc.width=Math.round(innerWidth*r);tc.height=Math.round(innerHeight*r);tx.setTransform(r,0,0,r,0,0)}
 function tmsg(s,keep){const m=$('omsg');m.textContent=s;m.style.display=s?'block':'none';clearTimeout(mT);if(s&&!keep)mT=setTimeout(()=>m.style.display='none',3500)}
 function updTName(){const d=D[cur];$('oname').textContent=d.e+' '+d.n}
-function onMotion(e){const a=e.accelerationIncludingGravity;if(!a||a.x==null||a.y==null||Math.hypot(a.x,a.y)<2.5)return;hasSensor=true;const s=iOS?-1:1;tt=flip*Math.atan2(-s*a.x,s*a.y)}
-async function openTilt(){
-  try{if(iOS){const r=await DeviceMotionEvent.requestPermission();if(r!=='granted')throw 0}}catch(e){}
-  window.addEventListener('devicemotion',onMotion);
-  ov.style.display='block';tsize();tOn=true;tl=1;th=0;tv=0;tt=0;hasSensor=false;tdone=false;
-  try{ov.requestFullscreen&&ov.requestFullscreen().catch(()=>{})}catch(e){}
-  updTName();tmsg('Tilt your phone sideways to drink');
-  setTimeout(()=>{if(tOn&&!hasSensor)tmsg('No tilt sensor found – drag left or right on the screen to tilt')},1800);
-  tlast=performance.now();requestAnimationFrame(tloop);
+async function wl(on){try{if(on&&navigator.wakeLock)lock=await navigator.wakeLock.request('screen');else if(lock){await lock.release();lock=null}}catch(e){}}
+function onMotion(e){
+  const a=e.accelerationIncludingGravity;
+  if(!a||a.x==null||a.y==null)return;
+  const s=iOS?-1:1;
+  gx+=(s*a.x-gx)*.35;gy+=(s*a.y-gy)*.35;      // low-pass filter to calm sensor noise
+  if(Math.hypot(gx,gy)<2.5)return;             // phone lying flat: keep last angle
+  hasSensor=true;
+  const ra=((screen.orientation&&screen.orientation.angle)||0)*Math.PI/180; // landscape support
+  tt=flip*wrap(Math.atan2(-gx,gy)+ra);
 }
-function closeTilt(){tOn=false;ov.style.display='none';window.removeEventListener('devicemotion',onMotion);try{document.fullscreenElement&&document.exitFullscreen().catch(()=>{})}catch(e){}}
-function tloop(t){
-  if(!tOn)return;
+async function openTilt(){
+  if(tOn)return;
+  tOn=true;ov.style.display='block';tsize();
+  try{ov.requestFullscreen&&ov.requestFullscreen().catch(()=>{})}catch(e){}
+  tl=1;th=0;tv=0;tt=0;gx=0;gy=9.8;hasSensor=false;tdone=false;dragTh=null;
+  updTName();
+  let ok=true;
+  try{if(iOS)ok=(await DeviceMotionEvent.requestPermission())==='granted'}catch(e){ok=false}
+  if(!tOn)return;                               // closed while the permission prompt was open
+  if(ok){window.addEventListener('devicemotion',onMotion);tmsg('Tilt your phone sideways to drink')}
+  else tmsg('Motion access was blocked \u2013 drag left or right to tilt instead',true);
+  setTimeout(()=>{if(tOn&&ok&&!hasSensor)tmsg('No tilt sensor found \u2013 drag left or right on the screen to tilt')},1800);
+  wl(true);
+  const id=++loopId;tlast=performance.now();requestAnimationFrame(t=>tloop(t,id));
+}
+function closeTilt(){
+  tOn=false;loopId++;ov.style.display='none';
+  window.removeEventListener('devicemotion',onMotion);wl(false);
+  try{document.fullscreenElement&&document.exitFullscreen().catch(()=>{})}catch(e){}
+}
+function tloop(t,id){
+  if(!tOn||id!==loopId)return;
   const dt=Math.min((t-tlast)/1000,.05);tlast=t;
   const target=(!hasSensor&&dragTh!=null)?dragTh:tt;
-  tv+=((target-th)*60-tv*8)*dt;th+=tv*dt;
-  if(Math.abs(target)>.6&&tl>0){tl=Math.max(0,tl-dt*.08);if(Math.random()<dt*2.2)sips++;
-    if(tl===0&&!tdone){tdone=true;glasses++;tmsg('Empty! Hit Refill or pick another drink',true)}stats()}
+  tv+=(wrap(target-th)*60-tv*8)*dt;th=wrap(th+tv*dt);   // springy slosh, shortest-way rotation
+  if(Math.abs(wrap(target))>.6&&tl>0){
+    tl=Math.max(0,tl-dt*.08);if(Math.random()<dt*2.2){sips++;stats()}
+    if(tl===0&&!tdone){tdone=true;glasses++;stats();tmsg('Empty! Hit Refill or pick another drink',true)}
+  }
   $('pct').textContent=Math.round(tl*100)+'%';
-  tdraw(dt);requestAnimationFrame(tloop);
+  tdraw(dt);requestAnimationFrame(t2=>tloop(t2,id));
 }
 function tdraw(dt){
   const w=innerWidth,h=innerHeight,d=D[cur],dg=Math.hypot(w,h);
@@ -207,8 +232,9 @@ function tdraw(dt){
   tx.restore();
 }
 tc.addEventListener('pointermove',e=>{if(e.buttons)dragTh=Math.max(-1.2,Math.min(1.2,(e.clientX-innerWidth/2)/(innerWidth/2)*1.2))});
-window.addEventListener('pointerup',()=>dragTh=null);
+['pointerup','pointercancel'].forEach(ev=>window.addEventListener(ev,()=>dragTh=null));
 window.addEventListener('resize',()=>{if(tOn)tsize()});
+document.addEventListener('visibilitychange',()=>{if(tOn&&!document.hidden)wl(true)});
 $('tiltbtn').onclick=openTilt;$('oclose').onclick=closeTilt;
 $('orefill').onclick=()=>{tl=1;tdone=false;tmsg('')};
 $('oflip').onclick=()=>{flip*=-1;tt*=-1;tmsg('Direction flipped')};
